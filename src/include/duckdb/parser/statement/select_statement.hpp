@@ -41,7 +41,7 @@ public:
 	DUCKDB_API string ToString() const override;
 	//! Create a copy of this SelectStatement
 	DUCKDB_API unique_ptr<SQLStatement> Copy() const override;
-	//! Whether or not the statements are equivalent
+	//! Whether the statements are equivalent
 	bool Equals(const SQLStatement &other) const;
 
 	void Serialize(Serializer &serializer) const;

@@ -28,7 +28,21 @@
  *	  src/backend/parser/scan.l
  *
  *-------------------------------------------------------------------------
+ 注意 注意 注意：
+ 此文件中的规则必须与 src/fe_utils/psqlscan.l 保持同步！
+ 规则是这样设计的：扫描器永远不需要回溯，
+ 这意味着总有一个规则可以匹配到目前为止的输入，
+ （规则的行动可能在内部通过 yyless() 抛回一些输入，然而）。正如 flex 手册中所解释的，
+ 这可以带来速度上的提升 --- 在简单的测试中，比普通的 -CF 词法分析器快大约三分之一。
+ 额外的复杂性主要在于处理浮点数和连续字符串文字的规则。如果您更改了词法规则，
+ 请通过使用带有 "-b" 选项的 flex 运行并检查生成的 "lex.backup" 文件是否表明不需要回溯，
+ 来验证您没有破坏无回溯 ' 属性。（从 PostgreSQL 9.2 开始，Makefile 中会自动进行此检查。）
+ 部分版权所有（c）1996-2018，PostgreSQL 全球开发小组
+ 部分版权所有（c）1994，加州大学董事会
+ 身份识别
+ src/backend/parser/scan.l
  */
+
 #include <ctype.h>
 //#include <unistd.h>
 #include "pg_functions.hpp"
@@ -113,10 +127,11 @@ extern void core_yyset_column(int column_no, yyscan_t yyscanner);
 
 %}
 
-%option reentrant
-%option bison-bridge
+/*----- Flex 选项配置 -----*/
+%option reentrant // 生成可重入的词法分析器（支持多线程）
+%option bison-bridge // 与 Bison 兼容的接口
 %option bison-locations
-%option 8bit
+%option 8bit // 处理 8 位字符（支持扩展 ASCII）
 %option never-interactive
 %option nodefault
 %option noinput
@@ -186,6 +201,20 @@ extern void core_yyset_column(int column_no, yyscan_t yyscanner);
  * XXX if you change the set of whitespace characters, fix scanner_isspace()
  * to agree, and see also the plpgsql lexer.
  */
+
+/*----- 自定义状态（Start Conditions） -----*/
+/*
+ * 定义 13 种独占状态，处理不同上下文：
+ * xb : 二进制字符串（B'...'）
+ * xc : C 风格注释（/*...* /）
+ * xd : 双引号标识符（"column"）
+ * xh : 十六进制字符串（X'...'）
+ * xe : 扩展转义字符串（E'...\'）
+ * xq : 标准字符串（'...'）
+ * xdolq: 美元引号字符串（$tag$...$tag$）
+ * xus : Unicode 转义字符串（U&'...'）
+ */
+
 
 space			[ \t\n\r\f]
 horiz_space		[ \t\f]

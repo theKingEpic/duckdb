@@ -20468,27 +20468,38 @@ int yyparse ();
 | yyparse.  |
 `----------*/
 
-#ifdef YYPARSE_PARAM
-#if (defined __STDC__ || defined __C99__FUNC__ \
-     || defined __cplusplus || defined _MSC_VER)
+#ifdef YYPARSE_PARAM  // 如果定义了YYPARSE_PARAM宏，进入此条件编译块
+#if (defined __STDC__ || defined __C99__FUNC__ \  // 检测编译器是否符合C标准或C99规范
+|| defined __cplusplus || defined _MSC_VER)  // 或检测C++编译器/MSVC编译器
 int
-yyparse (void *YYPARSE_PARAM)
-#else
+yyparse (void *YYPARSE_PARAM)  // 使用带参数的现代函数声明语法，参数为void指针类型
+#else  // 若未检测到上述编译器特性
 int
-yyparse (YYPARSE_PARAM)
-    void *YYPARSE_PARAM;
-#endif
-#else /* ! YYPARSE_PARAM */
-#if (defined __STDC__ || defined __C99__FUNC__ \
-     || defined __cplusplus || defined _MSC_VER)
+yyparse (YYPARSE_PARAM)  // 使用传统K&R风格函数声明
+void *YYPARSE_PARAM;  // 显式声明参数类型（旧式C语法）
+#endif  // 结束编译器特性判断的条件编译
+#else /* ! YYPARSE_PARAM */  // 当未定义YYPARSE_PARAM时进入else块
+#if (defined __STDC__ || defined __C99__FUNC__ \  // 同样的编译器特性检测
+|| defined __cplusplus || defined _MSC_VER)
 int
-yyparse (core_yyscan_t yyscanner)
-#else
+yyparse (core_yyscan_t yyscanner)  // 声明参数为core_yyscan_t类型（特定扫描器类型）
+#else  // 传统语法分支
 int
-yyparse (yyscanner)
-    core_yyscan_t yyscanner;
-#endif
-#endif
+yyparse (yyscanner)  // K&R风格参数声明
+core_yyscan_t yyscanner;  // 显式声明参数类型
+#endif  // 结束第二个编译器特性判断
+#endif  // 结束最外层YYPARSE_PARAM的条件编译
+
+/* 代码解析总结：
+   这段代码通过多重条件编译定义了Bison生成的解析器函数yyparse的不同原型：
+   1. 当定义YYPARSE_PARAM时：
+	  - 现代编译器：使用void指针参数（可能用于传递解析器上下文）
+	  - 传统编译器：使用K&R风格参数声明
+   2. 未定义YYPARSE_PARAM时：
+	  - 现代编译器：使用core_yyscan_t类型参数（通常关联词法扫描器状态）
+	  - 传统编译器：同样用K&R风格但参数类型为core_yyscan_t
+   这种设计兼容了不同编译器和不同Bison配置下的函数签名差异 */
+
 {
   /* The look-ahead symbol.  */
 int yychar;

@@ -5,6 +5,8 @@
  *	  than one of the parse/plan/execute stages of the query pipeline.
  *	  Currently, these are mostly nodes for executable expressions
  *	  and join trees.
+ *	  以下是针对 "原始" 节点类型的定义，这些节点类型在查询管道的解析/计划/执行阶段中被多次使用
+ *	  目前，这些主要是用于可执行表达式和连接树的节点。
  *
  *
  * Portions Copyright (c) 1996-2017, PostgreSQL Global Development PGGroup
@@ -596,7 +598,44 @@ typedef struct PGBoolExpr {
  *
  * The PG_CTE_SUBLINK case never occurs in actual PGSubLink nodes, but it is used
  * in SubPlans generated for WITH subqueries.
+* /*
+ * PGSubLink
+ *
+ * PGSubLink表示出现在表达式中的子查询，在某些情况下还包括位于其上的组合运算符。
+ * subLinkType指示所表示的表达式的形式：
+ *	PG_EXISTS_SUBLINK		EXISTS(SELECT ...)
+ *	PG_ALL_SUBLINK			(左操作数) op ALL (SELECT ...)
+ *	PG_ANY_SUBLINK			(左操作数) op ANY (SELECT ...)
+ *	PG_ROWCOMPARE_SUBLINK	(左操作数) op (SELECT ...)
+ *	PG_EXPR_SUBLINK		(SELECT单个目标列表项 ...)
+ *	PG_MULTIEXPR_SUBLINK	(SELECT多个目标列表项 ...)
+ *	PG_ARRAY_SUBLINK		ARRAY(SELECT单个目标列表项 ...)
+ *	PG_CTE_SUBLINK			WITH查询（实际上从不作为表达式的一部分）
+ * 对于ALL、ANY和ROWCOMPARE，左操作数是一个表达式列表，其长度与子查询的目标列表相同。
+ * ROWCOMPARE将始终具有一个包含多个条目的列表；如果子查询只有一个目标，
+ * 则解析器将创建一个PG_EXPR_SUBLINK（如果子查询上方有任何运算符，则该运算符将单独表示）。
+ * ROWCOMPARE、EXPR和MULTIEXPR要求子查询最多只能返回一行（如果没有返回行，结果为NULL）。
+ * ALL、ANY和ROWCOMPARE要求组合运算符产生布尔结果。ALL和ANY分别使用AND和OR语义组合每行结果。
+ * ARRAY要求只有一个目标列，并使用子查询返回的任意数量的行创建目标列类型的数组。
+ *
+ * PGSubLink被分类为PGExpr节点，但实际上它是不可执行的；
+ * 在规划期间，它必须在表达式树中被PGSubPlan节点替换。
+ *
+ * 注意：在gram.y的原始输出中，testexpr只包含左操作数的原始形式（如果有的话），
+ * operName是组合运算符的字符串名称。此外，subselect是一个原始解析树。
+ * 在解析分析期间，解析器将testexpr转换为一个完整的布尔表达式，
+ * 该表达式将左操作数值与表示子查询输出列的PG_PARAM_SUBLINK节点进行比较。
+ * subselect被转换为一个Query。这是在保存的规则和重写器中看到的表示。
+ *
+ * 在EXISTS、EXPR、MULTIEXPR和ARRAY SubLinks中，testexpr和operName未使用，始终为null。
+ *
+ * subLinkId目前仅用于MULTIEXPR SubLinks，在其他SubLinks中为零。
+ * 这个数字用于在UPDATE语句的SET列表中的不同多重赋值子查询中标识它们。
+ * 它在特定的目标列表中是唯一的。MULTIEXPR的输出列通过出现在tlist其他位置的PG_PARAM_MULTIEXPR参数来引用。
+ *
+ * PG_CTE_SUBLINK情况实际上从不在实际的PGSubLink节点中出现，但它用于为WITH子查询生成的SubPlans。
  */
+
 typedef enum PGSubLinkType {
 	PG_EXISTS_SUBLINK,
 	PG_ALL_SUBLINK,

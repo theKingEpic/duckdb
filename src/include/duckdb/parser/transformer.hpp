@@ -386,7 +386,9 @@ public:
 		return reinterpret_cast<T &>(node);
 	}
 	template <class T>
+	// 函数功能：将 void* 指针安全地转换为特定类型的 optional 指针包装
 	static optional_ptr<T> PGPointerCast(void *ptr) {
+		// 关键点：使用 reinterpret_cast 进行无类型检查的指针转换
 		return optional_ptr<T>(reinterpret_cast<T *>(ptr));
 	}
 };

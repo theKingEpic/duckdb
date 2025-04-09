@@ -42,30 +42,48 @@ namespace duckdb_libpgquery {
  * Returns a list of raw (un-analyzed) parse trees.  The immediate elements
  * of the list are always PGRawStmt nodes.
  */
+// 声明函数：将SQL字符串解析为抽象语法树（AST），返回PGList指针（PostgreSQL的链表结构）
 PGList *raw_parser(const char *str) {
+	// Flex词法分析器的状态机对象，用于跟踪扫描过程（如当前扫描位置、缓冲区状态等）
 	core_yyscan_t yyscanner;
+	// 自定义结构体，用于在词法分析器（Flex）和语法分析器（Bison）之间传递数据
 	base_yy_extra_type yyextra;
+	// 语法解析结果：0表示成功，非0表示失败
 	int yyresult;
 
-	/* initialize the flex scanner */
-	yyscanner = scanner_init(str, &yyextra.core_yy_extra, ScanKeywords, NumScanKeywords);
+	/* 初始化Flex词法分析器 */
+	// scanner_init：配置Flex词法分析器，传入输入字符串、关键字表等参数
+	yyscanner = scanner_init(
+		str,                     // 输入的SQL字符串
+		&yyextra.core_yy_extra,  // 传递给词法分析器的核心数据（如关键字、扫描状态）
+		ScanKeywords,            // 预定义的SQL关键字哈希表（如SELECT, FROM等）
+		NumScanKeywords          // 关键字的数量
+	);
 
-	/* base_yylex() only needs this much initialization */
+	/* 初始化语法分析器的预读标记状态 */
+	// 标记当前没有预读的token（Bison语法解析可能需要预读一个token来处理歧义语法）
 	yyextra.have_lookahead = false;
 
-	/* initialize the bison parser */
+	/* 初始化语法分析器（Bison）的上下文 */
+	// 重置parsetree为空链表，准备存储解析后的语法树节点
 	parser_init(&yyextra);
 
-	/* Parse! */
-	yyresult = base_yyparse(yyscanner);
+	/* 执行语法解析！ */
+	// 调用Bison生成的语法分析函数base_yyparse，启动解析过程
+	yyresult = base_yyparse(yyscanner);  // 返回值：0成功，非0失败
 
-	/* Clean up (release memory) */
+	/* 清理词法分析器资源 */
+	// 释放Flex词法分析器的内部缓冲区及状态机内存
 	scanner_finish(yyscanner);
 
-	if (yyresult) /* error */
+	// 处理解析结果
+	if (yyresult) {
+		/* 解析失败（如语法错误），返回空链表NIL（PostgreSQL中表示空结果的惯用方式） */
 		return NIL;
-
-	return yyextra.parsetree;
+	} else {
+		/* 解析成功，返回生成的语法树（存储在yyextra.parsetree中） */
+		return yyextra.parsetree;  // PGList链表，每个节点代表一个AST元素（如SELECT语句、表达式等）
+	}
 }
 
 PGKeywordCategory is_keyword(const char *text) {

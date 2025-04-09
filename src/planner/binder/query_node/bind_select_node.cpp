@@ -363,12 +363,22 @@ void Binder::BindModifiers(BoundQueryNode &result, idx_t table_index, const vect
 	}
 }
 
+// 定义一个返回unique_ptr<BoundQueryNode>的成员函数，用于绑定SelectNode
 unique_ptr<BoundQueryNode> Binder::BindNode(SelectNode &statement) {
+	// 断言确保statement中的from_table存在（不为nullptr）
 	D_ASSERT(statement.from_table);
 
-	// first bind the FROM table statement
+	// 1. 首先处理FROM子句的表引用部分
+	// 将statement.from_table的所有权转移给局部变量from（原指针变为nullptr）
 	auto from = std::move(statement.from_table);
+
+	// 2. 调用Bind()方法绑定表引用
+	// 解引用from（原statement.from_table）并绑定，结果存储在from_table中
+	// 这里会进入表引用的绑定过程（如表名解析、视图处理等）
 	auto from_table = Bind(*from);
+
+	// 3. 继续处理完整的SELECT节点绑定
+	// 将绑定好的from_table传递给BindSelectNode进行后续处理
 	return BindSelectNode(statement, std::move(from_table));
 }
 

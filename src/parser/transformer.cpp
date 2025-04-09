@@ -25,19 +25,35 @@ void Transformer::Clear() {
 	pivot_entries.clear();
 }
 
+// 转换 PostgreSQL 解析树为 DuckDB 的 SQLStatement 列表
 bool Transformer::TransformParseTree(duckdb_libpgquery::PGList *tree, vector<unique_ptr<SQLStatement>> &statements) {
+	// 初始化堆栈检查（防止递归过深导致栈溢出）
 	InitializeStackCheck();
+
+	// 遍历 PostgreSQL 语法树的每个节点（链表结构）
 	for (auto entry = tree->head; entry != nullptr; entry = entry->next) {
+		// 清除转换器的临时状态（如重置 PIVOT 缓存）
 		Clear();
+
+		// 将链表节点的数据转换为 PGNode 基类指针
 		auto n = PGPointerCast<duckdb_libpgquery::PGNode>(entry->data.ptr_value);
-		auto stmt = TransformStatement(*n);
+
+		// 将 PGNode 转换为 DuckDB 的 SQLStatement
+		auto stmt = TransformStatement(*n);  // 核心转换逻辑
+
+		// 断言确保转换后的语句非空
 		D_ASSERT(stmt);
+
+		// 特殊处理：如果转换过程中收集了 PIVOT 子句信息
 		if (HasPivotEntries()) {
+			// 生成 PIVOT 语句（将常规查询包装为 PIVOT 结构）
 			stmt = CreatePivotStatement(std::move(stmt));
 		}
+
+		// 将生成的语句加入结果列表
 		statements.push_back(std::move(stmt));
 	}
-	return true;
+	return true;  // 始终返回 true（错误可能通过异常抛出）
 }
 
 void Transformer::InitializeStackCheck() {
