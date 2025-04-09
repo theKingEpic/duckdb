@@ -188,121 +188,136 @@ vector<string> SplitQueryStringIntoStatements(const string &query) {
 	return query_statements;
 }
 
+// 解析SQL查询的主函数，输入为查询字符串query DuckDB选择复用PostgreSQL的解析器, 然后用 Transformer 将 PostgreSQL 的解析树转换为 DuckDB 的语法树
 void Parser::ParseQuery(const string &query) {
-	Transformer transformer(options);
-	string parser_error;
-	optional_idx parser_error_location;
-	{
-		// check if there are any unicode spaces in the string
-		string new_query;
-		if (StripUnicodeSpaces(query, new_query)) {
-			// there are - strip the unicode spaces and re-run the query
-			ParseQuery(new_query);
-			return;
-		}
-	}
-	{
-		PostgresParser::SetPreserveIdentifierCase(options.preserve_identifier_case);
-		bool parsing_succeed = false;
-		// Creating a new scope to prevent multiple PostgresParser destructors being called
-		// which led to some memory issues
-		{
-			PostgresParser parser;
-			parser.Parse(query);
-			if (parser.success) {
-				if (!parser.parse_tree) {
-					// empty statement
-					return;
-				}
+    // 创建语法树转换器，使用解析器配置选项
+    Transformer transformer(options);
+    string parser_error;             // 存储解析错误信息
+    optional_idx parser_error_location; // 存储错误位置（可选值）
 
-				// if it succeeded, we transform the Postgres parse tree into a list of
-				// SQLStatements
-				transformer.TransformParseTree(parser.parse_tree, statements);
-				parsing_succeed = true;
-			} else {
-				parser_error = parser.error_message;
-				if (parser.error_location > 0) {
-					parser_error_location = NumericCast<idx_t>(parser.error_location - 1);
-				}
-			}
-		}
-		// If DuckDB fails to parse the entire sql string, break the string down into individual statements
-		// using ';' as the delimiter so that parser extensions can parse the statement
-		if (parsing_succeed) {
-			// no-op
-			// return here would require refactoring into another function. o.w. will just no-op in order to run wrap up
-			// code at the end of this function
-		} else if (!options.extensions || options.extensions->empty()) {
-			throw ParserException::SyntaxError(query, parser_error, parser_error_location);
-		} else {
-			// split sql string into statements and re-parse using extension
-			auto query_statements = SplitQueryStringIntoStatements(query);
-			idx_t stmt_loc = 0;
-			for (auto const &query_statement : query_statements) {
-				ErrorData another_parser_error;
-				// Creating a new scope to allow extensions to use PostgresParser, which is not reentrant
-				{
-					PostgresParser another_parser;
-					another_parser.Parse(query_statement);
-					// LCOV_EXCL_START
-					// first see if DuckDB can parse this individual query statement
-					if (another_parser.success) {
-						if (!another_parser.parse_tree) {
-							// empty statement
-							continue;
-						}
-						transformer.TransformParseTree(another_parser.parse_tree, statements);
-						// important to set in the case of a mixture of DDB and parser ext statements
-						statements.back()->stmt_length = query_statement.size() - 1;
-						statements.back()->stmt_location = stmt_loc;
-						stmt_loc += query_statement.size();
-						continue;
-					} else {
-						another_parser_error = ErrorData(another_parser.error_message);
-						if (another_parser.error_location > 0) {
-							another_parser_error.AddQueryLocation(
-							    NumericCast<idx_t>(another_parser.error_location - 1));
-						}
-					}
-				} // LCOV_EXCL_STOP
-				// LCOV_EXCL_START
-				// let extensions parse the statement which DuckDB failed to parse
-				bool parsed_single_statement = false;
-				for (auto &ext : *options.extensions) {
-					D_ASSERT(!parsed_single_statement);
-					D_ASSERT(ext.parse_function);
-					auto result = ext.parse_function(ext.parser_info.get(), query_statement);
-					if (result.type == ParserExtensionResultType::PARSE_SUCCESSFUL) {
-						auto statement = make_uniq<ExtensionStatement>(ext, std::move(result.parse_data));
-						statement->stmt_length = query_statement.size() - 1;
-						statement->stmt_location = stmt_loc;
-						stmt_loc += query_statement.size();
-						statements.push_back(std::move(statement));
-						parsed_single_statement = true;
-						break;
-					} else if (result.type == ParserExtensionResultType::DISPLAY_EXTENSION_ERROR) {
-						throw ParserException::SyntaxError(query, result.error, result.error_location);
-					} else {
-						// We move to the next one!
-					}
-				}
-				if (!parsed_single_statement) {
-					throw ParserException::SyntaxError(query, parser_error, parser_error_location);
-				} // LCOV_EXCL_STOP
-			}
-		}
-	}
-	if (!statements.empty()) {
-		auto &last_statement = statements.back();
-		last_statement->stmt_length = query.size() - last_statement->stmt_location;
-		for (auto &statement : statements) {
-			statement->query = query;
-			if (statement->type == StatementType::CREATE_STATEMENT) {
-				auto &create = statement->Cast<CreateStatement>();
-				create.info->sql = query.substr(statement->stmt_location, statement->stmt_length);
-			}
-		}
-	}
+    // 阶段1：处理Unicode空格问题
+    {
+        string new_query;
+        if (StripUnicodeSpaces(query, new_query)) { // 检测并去除Unicode空格（如全角空格）
+            ParseQuery(new_query);  // 递归调用自身处理净化后的字符串
+            return;                 // 直接返回，避免后续重复处理
+        }
+    }
+
+    // 阶段2：主解析流程
+    {
+        // 设置Postgres解析器是否保留标识符大小写（如表名）
+        PostgresParser::SetPreserveIdentifierCase(options.preserve_identifier_case);
+        bool parsing_succeed = false;  // 主解析是否成功的标志
+
+        // 通过代码块限制PostgresParser作用域，确保析构顺序避免内存问题
+        {
+            PostgresParser parser;        // 创建Postgres兼容解析器
+            parser.Parse(query);          // 尝试解析原始查询
+
+            if (parser.success) {          // 解析成功分支
+                if (!parser.parse_tree) {  // 空语句检查（如仅含分号）
+                    return;                // 直接返回，不生成语句
+                }
+                // 将Postgres语法树转换为DuckDB的SQLStatement对象
+                transformer.TransformParseTree(parser.parse_tree, statements);
+                parsing_succeed = true;    // 标记主解析成功
+            } else {                      // 解析失败处理
+                parser_error = parser.error_message;  // 记录错误信息
+                if (parser.error_location > 0) {      // 定位错误字符位置
+                    // 调整位置索引（Postgres从1开始，转为从0开始）
+                    parser_error_location = NumericCast<idx_t>(parser.error_location - 1);
+                }
+            }
+        }  // PostgresParser在此处析构
+
+        // 阶段3：处理解析结果
+        if (parsing_succeed) {
+            // 主解析成功，无需操作（注释说明此处可能需要重构）
+        } else if (!options.extensions || options.extensions->empty()) {
+            // 无扩展解析器可用时，抛出标准语法错误
+            throw ParserException::SyntaxError(query, parser_error, parser_error_location);
+        } else {  // 存在扩展解析器的处理路径
+            // 将查询按分号拆分为独立语句
+            auto query_statements = SplitQueryStringIntoStatements(query);
+            idx_t stmt_loc = 0;  // 语句在原始查询中的起始位置
+
+            // 遍历每个拆分后的子语句
+            for (auto const &query_statement : query_statements) {
+                ErrorData another_parser_error;  // 扩展解析错误容器
+
+                // 嵌套作用域确保another_parser正确析构
+                {
+                    PostgresParser another_parser;  // 新建解析器实例
+                    another_parser.Parse(query_statement);  // 尝试解析子语句
+
+                    // 检查是否DuckDB原生解析成功
+                    if (another_parser.success) {
+                        if (!another_parser.parse_tree) {  // 空语句跳过
+                            continue;
+                        }
+                        // 转换语法树并记录语句元数据
+                        transformer.TransformParseTree(another_parser.parse_tree, statements);
+                        auto &last_stmt = statements.back();
+                        last_stmt->stmt_length = query_statement.size() - 1;  // 语句长度
+                        last_stmt->stmt_location = stmt_loc;                 // 起始位置
+                        stmt_loc += query_statement.size();  // 更新全局位置计数器
+                        continue;  // 处理下一个子语句
+                    } else {  // 记录扩展解析错误
+                        another_parser_error = ErrorData(another_parser.error_message);
+                        if (another_parser.error_location > 0) {
+                            another_parser_error.AddQueryLocation(
+                                NumericCast<idx_t>(another_parser.error_location - 1));
+                        }
+                    }
+                }  // another_parser析构
+
+                // 阶段4：尝试使用扩展解析器
+                bool parsed_single_statement = false;  // 扩展解析成功标志
+                for (auto &ext : *options.extensions) { // 遍历所有注册的扩展
+                    // 调用扩展的解析函数
+                    auto result = ext.parse_function(ext.parser_info.get(), query_statement);
+
+                    if (result.type == ParserExtensionResultType::PARSE_SUCCESSFUL) {
+                        // 创建扩展专属的Statement对象
+                        auto statement = make_uniq<ExtensionStatement>(ext, std::move(result.parse_data));
+                        // 设置语句位置元数据
+                        statement->stmt_length = query_statement.size() - 1;
+                        statement->stmt_location = stmt_loc;
+                        stmt_loc += query_statement.size();
+                        statements.push_back(std::move(statement));  // 存储语句
+                        parsed_single_statement = true;
+                        break;  // 跳出扩展循环
+                    } else if (result.type == ParserExtensionResultType::DISPLAY_EXTENSION_ERROR) {
+                        // 扩展明确报错时抛出异常
+                        throw ParserException::SyntaxError(query, result.error, result.error_location);
+                    }
+                    // 其他情况继续尝试下一个扩展
+                }
+
+                if (!parsed_single_statement) {  // 所有扩展均解析失败
+                    throw ParserException::SyntaxError(query, parser_error, parser_error_location);
+                }
+            }
+        }
+    }  // 结束主处理块
+
+    // 阶段5：后处理语句列表
+    if (!statements.empty()) {
+        auto &last_statement = statements.back();  // 处理最后一个语句
+        // 修正最后一个语句的长度（可能因分号处理被截断）
+        last_statement->stmt_length = query.size() - last_statement->stmt_location;
+
+        // 为所有语句附加原始查询文本，并特别处理CREATE语句
+        for (auto &statement : statements) {
+            statement->query = query;  // 绑定原始SQL字符串
+            if (statement->type == StatementType::CREATE_STATEMENT) {
+                auto &create = statement->Cast<CreateStatement>();
+                // 提取该语句对应的原始SQL片段（用于信息模式存储）
+                create.info->sql = query.substr(statement->stmt_location, statement->stmt_length);
+            }
+        }
+    }
 }
 
 vector<SimplifiedToken> Parser::Tokenize(const string &query) {

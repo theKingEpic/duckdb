@@ -42,21 +42,23 @@ namespace duckdb_libpgquery {
 
 typedef struct PGListCell ListCell;
 
+// 定义链表结构体 PGList，用于存储不同类型的链表
 typedef struct PGList {
-	PGNodeTag		type;			/* duckdb_libpgquery::T_PGList, duckdb_libpgquery::T_PGIntList, or duckdb_libpgquery::T_PGOidList */
-	int			length;
-	PGListCell   *head;
-	PGListCell   *tail;
+	PGNodeTag type;     // 链表类型标识，可以是 T_PGList、T_PGIntList 或 T_POidList
+	// 用于区分链表中存储的数据类型：通用指针、整型或 OID 类型
+	int length;         // 链表长度，记录当前链表中节点的数量，避免遍历计算
+	PGListCell *head;   // 指向链表第一个节点的指针，用于从头开始遍历
+	PGListCell *tail;   // 指向链表最后一个节点的指针，便于快速在尾部添加新节点
 } PGList;
 
+// 定义链表节点结构体 PGListCell，表示链表中的每个元素
 struct PGListCell {
-	union
-	{
-		void	   *ptr_value;
-		int			int_value;
-		PGOid			oid_value;
-	}			data;
-	PGListCell   *next;
+	union {             // 联合体存储节点的值，同一时间只能使用其中一个字段
+		void *ptr_value;    // 通用指针，可指向任意数据类型（当链表类型为 T_PGList 时使用）
+		int int_value;      // 整型值（当链表类型为 T_PGIntList 时使用）
+		PGOid oid_value;    // OID (对象标识符（Object Identifier))类型值（当链表类型为 T_POidList 时使用）
+	} data;
+	PGListCell *next;   // 指向下一个节点的指针，形成单向链表结构
 };
 
 /*

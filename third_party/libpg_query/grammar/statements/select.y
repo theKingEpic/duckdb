@@ -42,6 +42,12 @@
  *
  * In non-expression contexts, we use PGSelectStmt which can represent a SELECT
  * with or without outer parentheses.
+ 一个完整的 SELECT 语句看起来像这样。
+ 该规则返回一个单独的 PGSelectStmt 节点或一个代表集合操作树的 PGSelectStmt 节点树。
+ 当子 SELECT 位于 a_expr 中并且有多余的括号时，存在一个歧义：这些括号是属于子 SELECT 还是属于周围的 a_expr？我们其实并不关心，但是 bison 需要知道。为了解决这个歧义，我们小心地定义语法，以便尽可能晚地做出决定：只要我们能够将括号吸收到子 SELECT 中，我们就会这样做，只有在不再可能这样做时，我们才会决定括号属于表达式。例如，在 "SELECT (((SELECT 2)) + 3)" 中，额外的括号被视为子 SELECT 的一部分。这种做法的必要性在 "SELECT (((SELECT 2)) UNION SELECT 2)" 中得到了展示。如果我们把 "((SELECT 2))" 解析为 a_expr，那么当我们看到 UNION 时，就为时已晚，无法回到 SELECT 的观点。
+ 这种方法通过定义一个非终端 select_with_parens 来实现，它代表至少有一层外部括号的 SELECT，并且在表达式语法中始终使用 select_with_parens，永远不要使用 '(' PGSelectStmt ')'。我们将因此产生移位-归约冲突，我们可以通过始终将 '(' <select> ')' 视为 select_with_parens 来解决这些冲突。为了解决冲突，与 select_with_parens 产生冲突的产生式被手动赋予比 ')' 的优先级低的优先级，从而确保我们移位 ')'（然后归约到 select_with_parens），而不是试图将内部 <select> 非终端归约到其他东西。我们为此使用 UMINUS 的优先级，这是一个相当任意的选择。
+ 为了能够无歧义地定义 select_with_parens 本身，我们需要一个代表没有最外层括号的 SELECT 结构的非终端 select_no_parens。这有点繁琐，但是有效。
+ 在非表达式上下文中，我们使用 PGSelectStmt，它可以代表带有或不带有外部括号的 SELECT。
  */
 
 SelectStmt: select_no_parens			%prec UMINUS
