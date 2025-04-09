@@ -22,10 +22,14 @@ void RemoveOrderQualificationRecursive(unique_ptr<ParsedExpression> &expr) {
 }
 
 unique_ptr<ParsedExpression> Transformer::TransformSubquery(duckdb_libpgquery::PGSubLink &root) {
+	// 创建子查询表达式对象
 	auto subquery_expr = make_uniq<SubqueryExpression>();
 
+	// 转换子查询的SELECT语句并存入表达式
 	subquery_expr->subquery = TransformSelectStmt(*root.subselect);
+	// 设置该表达式在SQL文本中的位置信息
 	SetQueryLocation(*subquery_expr, root.location);
+	// 断言确保子查询存在且SELECT列表非空
 	D_ASSERT(subquery_expr->subquery);
 	D_ASSERT(!subquery_expr->subquery->node->GetSelectList().empty());
 

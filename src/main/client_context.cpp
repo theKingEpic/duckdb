@@ -946,62 +946,82 @@ unique_ptr<QueryResult> ClientContext::Query(unique_ptr<SQLStatement> statement,
 }
 
 unique_ptr<QueryResult> ClientContext::Query(const string &query, bool allow_stream_result) {
-	auto lock = LockContext();
+    // 获取上下文锁，确保线程安全（可能是RAII机制自动释放锁）
+    auto lock = LockContext();
 
-	ErrorData error;
-	vector<unique_ptr<SQLStatement>> statements;
-	if (!ParseStatements(*lock, query, statements, error)) {
-		return ErrorResult<MaterializedQueryResult>(std::move(error), query);
-	}
-	if (statements.empty()) {
-		// no statements, return empty successful result
-		StatementProperties properties;
-		vector<string> names;
-		auto collection = make_uniq<ColumnDataCollection>(Allocator::DefaultAllocator());
-		return make_uniq<MaterializedQueryResult>(StatementType::INVALID_STATEMENT, properties, std::move(names),
-		                                          std::move(collection), GetClientProperties());
-	}
+    // 1. 解析SQL语句
+    ErrorData error;
+    vector<unique_ptr<SQLStatement>> statements;
+    // 调用解析器将查询字符串转换为SQLStatement对象集合
+    if (!ParseStatements(*lock, query, statements, error)) {
+        // 解析失败，返回错误结果（Materialized物化结果类型）
+        return ErrorResult<MaterializedQueryResult>(std::move(error), query);
+    }
+    // 处理空语句情况（如注释或空字符串）
+    if (statements.empty()) {
+        // 创建空结果：无列名、无数据的查询结果
+        StatementProperties properties;
+        vector<string> names;
+        auto collection = make_uniq<ColumnDataCollection>(Allocator::DefaultAllocator());
+        return make_uniq<MaterializedQueryResult>(
+            StatementType::INVALID_STATEMENT, properties, std::move(names),
+            std::move(collection), GetClientProperties()
+        );
+    }
 
-	unique_ptr<QueryResult> result;
-	optional_ptr<QueryResult> last_result;
-	bool last_had_result = false;
-	for (idx_t i = 0; i < statements.size(); i++) {
-		auto &statement = statements[i];
-		bool is_last_statement = i + 1 == statements.size();
-		PendingQueryParameters parameters;
-		parameters.allow_stream_result = allow_stream_result && is_last_statement;
-		auto pending_query = PendingQueryInternal(*lock, std::move(statement), parameters);
-		auto has_result = pending_query->properties.return_type == StatementReturnType::QUERY_RESULT;
-		unique_ptr<QueryResult> current_result;
-		if (pending_query->HasError()) {
-			current_result = ErrorResult<MaterializedQueryResult>(pending_query->GetErrorObject());
-		} else {
-			current_result = ExecutePendingQueryInternal(*lock, *pending_query);
-		}
-		// now append the result to the list of results
-		if (!last_result || !last_had_result) {
-			// first result of the query
-			result = std::move(current_result);
-			last_result = result.get();
-			last_had_result = has_result;
-		} else {
-			// later results; attach to the result chain
-			// but only if there is a result
-			if (!has_result) {
-				continue;
-			}
-			last_result->next = std::move(current_result);
-			last_result = last_result->next.get();
-		}
-		D_ASSERT(last_result);
-		if (last_result->HasError()) {
-			// Reset the interrupted flag, this was set by the task that found the error
-			// Next statements should not be bothered by that interruption
-			interrupted = false;
-			break;
-		}
-	}
-	return result;
+    // 2. 遍历每个语句进行处理
+    unique_ptr<QueryResult> result;          // 最终返回的结果链头节点
+    optional_ptr<QueryResult> last_result;   // 当前结果链的尾节点
+    bool last_had_result = false;            // 记录前一个语句是否有返回结果
+
+    for (idx_t i = 0; i < statements.size(); i++) {
+        auto &statement = statements[i];
+        bool is_last_statement = i + 1 == statements.size();  // 判断是否为最后一个语句
+
+        // 3. 创建PendingQuery（预处理查询对象）
+        PendingQueryParameters parameters;
+        // 仅允许最后一个语句使用流式结果（避免中间结果占用资源）
+        parameters.allow_stream_result = allow_stream_result && is_last_statement;
+        auto pending_query = PendingQueryInternal(*lock, std::move(statement), parameters);
+
+        // 判断该语句是否会返回结果（如SELECT会返回，而INSERT可能不返回）
+        auto has_result = pending_query->properties.return_type == StatementReturnType::QUERY_RESULT;
+
+        // 4. 执行查询
+        unique_ptr<QueryResult> current_result;
+        if (pending_query->HasError()) {
+            // 预处理阶段出错，生成错误结果
+            current_result = ErrorResult<MaterializedQueryResult>(pending_query->GetErrorObject());
+        } else {
+            // 执行查询，获取结果（可能是Materialized或Streaming类型）
+            current_result = ExecutePendingQueryInternal(*lock, *pending_query);
+        }
+
+        // 将当前结果链接到结果链中
+        if (!last_result || !last_had_result) {
+            // 第一个结果或前序无结果的语句（如INSERT）
+            result = std::move(current_result);      // 转移所有权到链头
+            last_result = result.get();              // 尾指针指向当前结果
+            last_had_result = has_result;            // 更新结果标志
+        } else {
+            // 后续结果，链接到链尾的next指针
+            if (!has_result) {  // 跳过无结果的语句（如CREATE TABLE）
+                continue;
+            }
+            last_result->next = std::move(current_result);  // 链接新结果
+            last_result = last_result->next.get();           // 移动尾指针
+        }
+
+        D_ASSERT(last_result);  // 断言确保尾指针有效
+
+        if (last_result->HasError()) {
+            // 当前结果有错误：重置中断标志（可能由异步任务设置）
+            interrupted = false;
+            break;  // 终止后续语句执行
+        }
+    }
+
+    return result;  // 返回结果链（可能包含多个结果通过next链接）
 }
 
 bool ClientContext::ParseStatements(ClientContextLock &lock, const string &query,

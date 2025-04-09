@@ -90,12 +90,19 @@ unique_ptr<ParsedExpression> Transformer::TransformExpression(optional_ptr<duckd
 	return TransformExpression(*node);
 }
 
-void Transformer::TransformExpressionList(duckdb_libpgquery::PGList &list,
-                                          vector<unique_ptr<ParsedExpression>> &result) {
+void Transformer::TransformExpressionList(
+	duckdb_libpgquery::PGList &list,              // 输入：PostgreSQL 解析树的链表
+	vector<unique_ptr<ParsedExpression>> &result  // 输出：DuckDB 表达式对象的集合
+) {
+	// 遍历链表的每个节点
 	for (auto node = list.head; node != nullptr; node = node->next) {
+		// 1. 将链表节点的数据转换为 PGNode 指针
 		auto target = PGPointerCast<duckdb_libpgquery::PGNode>(node->data.ptr_value);
 
+		// 2. 递归转换当前表达式节点
 		auto expr = TransformExpression(*target);
+
+		// 3. 将生成的表达式存入结果向量
 		result.push_back(std::move(expr));
 	}
 }
