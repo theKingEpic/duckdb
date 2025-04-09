@@ -634,7 +634,8 @@ typedef struct PGBoolExpr {
  * 它在特定的目标列表中是唯一的。MULTIEXPR的输出列通过出现在tlist其他位置的PG_PARAM_MULTIEXPR参数来引用。
  *
  * PG_CTE_SUBLINK情况实际上从不在实际的PGSubLink节点中出现，但它用于为WITH子查询生成的SubPlans。
- */
+*/
+
 
 typedef enum PGSubLinkType {
 	PG_EXISTS_SUBLINK,

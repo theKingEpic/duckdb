@@ -343,35 +343,57 @@ unique_ptr<BoundQueryNode> Binder::BindNode(QueryNode &node) {
 	return result;
 }
 
+// 绑定查询节点(QueryNode)的入口函数，处理所有类型的查询节点
 BoundStatement Binder::Bind(QueryNode &node) {
+	// 创建返回的BoundStatement对象
 	BoundStatement result;
-	if (node.type != QueryNodeType::CTE_NODE && // Issue #13850 - Don't auto-materialize if users materialize (for now)
-	    !Optimizer::OptimizerDisabled(context, OptimizerType::MATERIALIZED_CTE) && context.config.enable_optimizer &&
-	    OptimizeCTEs(node)) {
+
+	// 检查是否应该尝试优化CTE(Common Table Expressions)：
+	// 1. 当前节点不是CTE_NODE类型(避免重复处理)
+	// 2. 未禁用物化CTE优化器(OptimizerType::MATERIALIZED_CTE)
+	// 3. 启用了优化器
+	// 4. OptimizeCTEs(node)返回true(表示可以优化)
+	if (node.type != QueryNodeType::CTE_NODE &&
+		!Optimizer::OptimizerDisabled(context, OptimizerType::MATERIALIZED_CTE) &&
+		context.config.enable_optimizer &&
+		OptimizeCTEs(node)) {
+
+		// 根据节点类型分发到具体的绑定方法
 		switch (node.type) {
 		case QueryNodeType::SELECT_NODE:
-			result = BindWithCTE(node.Cast<SelectNode>());
+			// 处理普通SELECT查询节点
+				result = BindWithCTE(node.Cast<SelectNode>());
 			break;
 		case QueryNodeType::RECURSIVE_CTE_NODE:
-			result = BindWithCTE(node.Cast<RecursiveCTENode>());
+			// 处理递归CTE节点
+				result = BindWithCTE(node.Cast<RecursiveCTENode>());
 			break;
 		case QueryNodeType::CTE_NODE:
-			result = BindWithCTE(node.Cast<CTENode>());
+			// 处理普通CTE节点
+				result = BindWithCTE(node.Cast<CTENode>());
 			break;
 		default:
-			D_ASSERT(node.type == QueryNodeType::SET_OPERATION_NODE);
+			// 断言确保只有SET_OPERATION_NODE会走到这里
+				D_ASSERT(node.type == QueryNodeType::SET_OPERATION_NODE);
+			// 处理集合操作节点(UNION/INTERSECT/EXCEPT等)
 			result = BindWithCTE(node.Cast<SetOperationNode>());
 			break;
 		}
-	} else {
-		auto bound_node = BindNode(node);
+		} else {
+			// 不进行CTE优化时的常规绑定路径
 
-		result.names = bound_node->names;
-		result.types = bound_node->types;
+			// 调用BindNode进行基础绑定，返回BoundQueryNode
+			auto bound_node = BindNode(node);
 
-		// and plan it
-		result.plan = CreatePlan(*bound_node);
-	}
+			// 设置结果集的列名和类型
+			result.names = bound_node->names;
+			result.types = bound_node->types;
+
+			// 创建查询执行计划 进行具体的把绑定关系转换为逻辑计划树
+			result.plan = CreatePlan(*bound_node);
+		}
+
+	// 返回完整的BoundStatement
 	return result;
 }
 

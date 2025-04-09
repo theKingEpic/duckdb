@@ -365,7 +365,7 @@ void Binder::BindModifiers(BoundQueryNode &result, idx_t table_index, const vect
 
 // 定义一个返回unique_ptr<BoundQueryNode>的成员函数，用于绑定SelectNode
 unique_ptr<BoundQueryNode> Binder::BindNode(SelectNode &statement) {
-	// 断言确保statement中的from_table存在（不为nullptr）
+	// 断言确保statement中的from_table存在（不为nullptr）git log --oneline -n 1
 	D_ASSERT(statement.from_table);
 
 	// 1. 首先处理FROM子句的表引用部分
