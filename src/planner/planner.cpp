@@ -30,71 +30,91 @@ static void CheckTreeDepth(const LogicalOperator &op, idx_t max_depth, idx_t dep
 }
 
 void Planner::CreatePlan(SQLStatement &statement) {
-	auto &profiler = QueryProfiler::Get(context);
-	auto parameter_count = statement.named_param_map.size();
+    // 获取查询分析器实例
+    auto &profiler = QueryProfiler::Get(context);
+    // 获取SQL语句中命名参数的数量
+    auto parameter_count = statement.named_param_map.size();
 
-	BoundParameterMap bound_parameters(parameter_data);
+    // 创建绑定参数映射，用于存储参数数据
+	// 使用参数数据(parameter_data)初始化BoundParameterMap对象
+	// 该对象用于存储和管理SQL语句中的绑定参数
+    BoundParameterMap bound_parameters(parameter_data);
 
-	// first bind the tables and columns to the catalog
-	bool parameters_resolved = true;
-	try {
-		profiler.StartPhase(MetricsType::PLANNER_BINDING);
-		binder->parameters = &bound_parameters;
-		auto bound_statement = binder->Bind(statement);
-		profiler.EndPhase();
+    // 标记参数是否已成功解析
+    bool parameters_resolved = true;
+    try {
+        // 开始绑定阶段性能分析
+        profiler.StartPhase(MetricsType::PLANNER_BINDING);
+        // 设置绑定器的参数映射
+        binder->parameters = &bound_parameters;
+        // 执行绑定操作，将SQL语句转换为绑定后的语句
+        auto bound_statement = binder->Bind(statement);
+        // 结束绑定阶段性能分析
+        profiler.EndPhase();
 
-		this->names = bound_statement.names;
-		this->types = bound_statement.types;
-		this->plan = std::move(bound_statement.plan);
+        // 保存绑定后的结果：列名、类型和执行计划
+        this->names = bound_statement.names;
+        this->types = bound_statement.types;
+        this->plan = std::move(bound_statement.plan);
 
-		auto max_tree_depth = ClientConfig::GetConfig(context).max_expression_depth;
-		CheckTreeDepth(*plan, max_tree_depth);
-	} catch (const std::exception &ex) {
-		ErrorData error(ex);
-		this->plan = nullptr;
-		if (error.Type() == ExceptionType::PARAMETER_NOT_RESOLVED) {
-			// parameter types could not be resolved
-			this->names = {"unknown"};
-			this->types = {LogicalTypeId::UNKNOWN};
-			parameters_resolved = false;
-		} else if (error.Type() != ExceptionType::INVALID) {
-			// different exception type - try operator_extensions
-			auto &config = DBConfig::GetConfig(context);
-			for (auto &extension_op : config.operator_extensions) {
-				auto bound_statement =
-				    extension_op->Bind(context, *this->binder, extension_op->operator_info.get(), statement);
-				if (bound_statement.plan != nullptr) {
-					this->names = bound_statement.names;
-					this->types = bound_statement.types;
-					this->plan = std::move(bound_statement.plan);
-					break;
-				}
-			}
-			if (!this->plan) {
-				throw;
-			}
-		} else {
-			throw;
-		}
-	}
-	this->properties = binder->GetStatementProperties();
-	this->properties.parameter_count = parameter_count;
-	properties.bound_all_parameters = !bound_parameters.rebind && parameters_resolved;
+        // 检查执行计划的表达式深度是否超过配置的最大深度
+        auto max_tree_depth = ClientConfig::GetConfig(context).max_expression_depth;
+        CheckTreeDepth(*plan, max_tree_depth);
+    } catch (const std::exception &ex) {
+        // 处理绑定过程中出现的异常
+        ErrorData error(ex);
+        this->plan = nullptr;
+        if (error.Type() == ExceptionType::PARAMETER_NOT_RESOLVED) {
+            // 参数类型无法解析的情况
+            this->names = {"unknown"};
+            this->types = {LogicalTypeId::UNKNOWN};
+            parameters_resolved = false;
+        } else if (error.Type() != ExceptionType::INVALID) {
+            // 其他类型的异常，尝试使用操作符扩展来处理
+            auto &config = DBConfig::GetConfig(context);
+            for (auto &extension_op : config.operator_extensions) {
+                // 尝试让每个扩展操作符处理该语句
+                auto bound_statement =
+                    extension_op->Bind(context, *this->binder, extension_op->operator_info.get(), statement);
+                if (bound_statement.plan != nullptr) {
+                    // 如果扩展操作符成功处理，保存结果
+                    this->names = bound_statement.names;
+                    this->types = bound_statement.types;
+                    this->plan = std::move(bound_statement.plan);
+                    break;
+                }
+            }
+            if (!this->plan) {
+                // 如果没有扩展操作符能处理该语句，重新抛出异常
+                throw;
+            }
+        } else {
+            // 无效异常类型，直接重新抛出
+            throw;
+        }
+    }
 
-	Planner::VerifyPlan(context, plan, bound_parameters.GetParametersPtr());
+    // 获取语句属性并设置参数相关信息
+    this->properties = binder->GetStatementProperties();
+    this->properties.parameter_count = parameter_count;
+    properties.bound_all_parameters = !bound_parameters.rebind && parameters_resolved;
 
-	// set up a map of parameter number -> value entries
-	for (auto &kv : bound_parameters.GetParameters()) {
-		auto &identifier = kv.first;
-		auto &param = kv.second;
-		// check if the type of the parameter could be resolved
-		if (!param->return_type.IsValid()) {
-			properties.bound_all_parameters = false;
-			continue;
-		}
-		param->SetValue(Value(param->return_type));
-		value_map[identifier] = param;
-	}
+    // 验证执行计划和参数
+    Planner::VerifyPlan(context, plan, bound_parameters.GetParametersPtr());
+
+    // 设置参数编号到参数值的映射
+    for (auto &kv : bound_parameters.GetParameters()) {
+        auto &identifier = kv.first;
+        auto &param = kv.second;
+        // 检查参数类型是否已解析
+        if (!param->return_type.IsValid()) {
+            properties.bound_all_parameters = false;
+            continue;
+        }
+        // 设置参数的默认值
+        param->SetValue(Value(param->return_type));
+        value_map[identifier] = param;
+    }
 }
 
 shared_ptr<PreparedStatementData> Planner::PrepareSQLStatement(unique_ptr<SQLStatement> statement) {
