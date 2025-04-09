@@ -387,7 +387,7 @@ BoundStatement Binder::Bind(QueryNode &node) {
 			result.names = bound_node->names;
 			result.types = bound_node->types;
 
-			// 创建查询执行计划
+			// 创建查询执行计划 进行具体的把绑定关系转换为逻辑计划树
 			result.plan = CreatePlan(*bound_node);
 		}
 
