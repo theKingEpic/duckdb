@@ -637,32 +637,71 @@ void BindContext::AddTableFunction(idx_t index, const string &alias, const vecto
 	    make_uniq<TableBinding>(alias, types, names, bound_column_ids, entry, index, std::move(virtual_columns)));
 }
 
+/**
+ * @brief 向绑定上下文添加列名，自动处理命名冲突（通过添加后缀）
+ *
+ * @param base_name 原始列名（可能来自表定义或用户指定的别名）
+ * @param current_names 当前已存在的列名集合（大小写不敏感）
+ * @return string 处理后的列名，保证在当前上下文中唯一
+ */
 static string AddColumnNameToBinding(const string &base_name, case_insensitive_set_t &current_names) {
-	idx_t index = 1;
-	string name = base_name;
+	idx_t index = 1;         // 冲突解决计数器，从1开始
+	string name = base_name; // 最终确定的列名
+
+	// 检查列名是否已存在（大小写不敏感匹配）
 	while (current_names.find(name) != current_names.end()) {
+		// 如果存在冲突，在原始列名后追加"_数字"后缀（如col_1, col_2...）
 		name = base_name + "_" + std::to_string(index++);
 	}
+
+	// 将最终确定的列名加入已存在集合
 	current_names.insert(name);
+
+	// 返回处理后的列名
 	return name;
 }
 
+/**
+ * @brief 绑定列名并处理别名，生成最终的列名列表
+ *
+ * @param table_name 原始表名（用于错误提示）
+ * @param names 原始列名列表
+ * @param column_aliases 用户指定的列别名列表
+ * @return vector<string> 处理后的列名列表（包含处理后的别名）
+ * @throws BinderException 当别名数量超过实际列数时抛出
+ *
+ * @details 该函数分两个阶段处理列名：
+ *          1. 首先处理用户提供的列别名，检查命名冲突
+ *          2. 然后处理未指定别名的剩余列，使用原始列名
+ *          所有列名都会通过AddColumnNameToBinding确保唯一性
+ */
 vector<string> BindContext::AliasColumnNames(const string &table_name, const vector<string> &names,
                                              const vector<string> &column_aliases) {
-	vector<string> result;
+	vector<string> result; // 最终返回的列名列表（包含处理后的别名）
+
+	// 检查别名数量是否超过实际列数
 	if (column_aliases.size() > names.size()) {
 		throw BinderException("table \"%s\" has %lld columns available but %lld columns specified", table_name,
-		                      names.size(), column_aliases.size());
+		                      names.size(),         // 实际列数
+		                      column_aliases.size() // 用户指定的别名数
+		);
 	}
+
+	// 用于检测列名冲突的大小写不敏感集合
 	case_insensitive_set_t current_names;
-	// use any provided column aliases first
+
+	// 第一阶段：处理用户提供的列别名
 	for (idx_t i = 0; i < column_aliases.size(); i++) {
+		// 将别名加入结果集，同时检查命名冲突
 		result.push_back(AddColumnNameToBinding(column_aliases[i], current_names));
 	}
-	// if not enough aliases were provided, use the default names for remaining columns
+
+	// 第二阶段：处理未指定别名的剩余列
 	for (idx_t i = column_aliases.size(); i < names.size(); i++) {
+		// 使用原始列名，同时检查命名冲突
 		result.push_back(AddColumnNameToBinding(names[i], current_names));
 	}
+
 	return result;
 }
 
