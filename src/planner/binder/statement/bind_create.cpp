@@ -78,15 +78,15 @@ void Binder::BindSchemaOrCatalog(CatalogEntryRetriever &retriever, string &catal
 				// 获取catalog条目
 				auto catalog_ptr = Catalog::GetCatalogEntry(retriever, catalog_name);
 				if (!catalog_ptr) {
-					continue;  // 如果catalog不存在则跳过
+					continue; // 如果catalog不存在则跳过
 				}
 
 				// 检查catalog或schema是否存在歧义（同名冲突）
 				if (catalog_ptr->CheckAmbiguousCatalogOrSchema(context, schema)) {
 					// 抛出异常：存在歧义引用
 					throw BinderException(
-						"Ambiguous reference to catalog or schema \"%s\" - use a fully qualified path like \"%s.%s\"",
-						schema, catalog_name, schema);
+					    "Ambiguous reference to catalog or schema \"%s\" - use a fully qualified path like \"%s.%s\"",
+					    schema, catalog_name, schema);
 				}
 			}
 
@@ -97,9 +97,23 @@ void Binder::BindSchemaOrCatalog(CatalogEntryRetriever &retriever, string &catal
 	}
 }
 
-void Binder::BindSchemaOrCatalog(ClientContext &context, string &catalog, string &schema) {
-	CatalogEntryRetriever retriever(context);
-	BindSchemaOrCatalog(retriever, catalog, schema);
+/**
+ * @brief 获取 DuckDB 表条目的扫描函数
+ *
+ * @param context 客户端上下文，包含会话状态等信息
+ * @param bind_data 输出参数，用于存储表扫描的绑定数据
+ * @return TableFunction 返回配置好的表扫描函数
+ */
+TableFunction DuckTableEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) {
+	// 1. 创建表扫描绑定数据对象
+	// - 使用 make_uniq 创建 TableScanBindData 唯一指针
+	// - 传入当前表对象的引用(*this)初始化绑定数据
+	bind_data = make_uniq<TableScanBindData>(*this);
+
+	// 2. 获取并返回表扫描函数
+	// - 调用 TableScanFunction 的静态方法 GetFunction()
+	// - 返回标准的 DuckDB 表扫描函数实现
+	return TableScanFunction::GetFunction();
 }
 
 void Binder::BindSchemaOrCatalog(string &catalog, string &schema) {
