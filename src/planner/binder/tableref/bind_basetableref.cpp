@@ -285,47 +285,74 @@ unique_ptr<BoundTableRef> Binder::Bind(BaseTableRef &ref) {
 
 	switch (table_or_view->type) {
 	case CatalogType::TABLE_ENTRY: {
-		// base table: create the BoundBaseTableRef node
-		auto table_index = GenerateTableIndex();
-		auto &table = table_or_view->Cast<TableCatalogEntry>();
+		// 基础表处理：创建BoundBaseTableRef节点
+		auto table_index = GenerateTableIndex();                // 生成表的唯一索引标识
+		auto &table = table_or_view->Cast<TableCatalogEntry>(); // 转换为具体的表目录条目
 
+		// 注册数据库读操作（记录语句需要访问的表）
 		auto &properties = GetStatementProperties();
 		properties.RegisterDBRead(table.ParentCatalog(), context);
 
+		// 准备表扫描函数和绑定数据
 		unique_ptr<FunctionData> bind_data;
-		auto scan_function = table.GetScanFunction(context, bind_data, table_lookup);
-		// TODO: bundle the type and name vector in a struct (e.g PackedColumnMetadata)
-		vector<LogicalType> table_types;
-		vector<string> table_names;
-		vector<TableColumnType> table_categories;
+		auto scan_function = table.GetScanFunction(context, bind_data, table_lookup); // 获取表扫描函数
 
-		vector<LogicalType> return_types;
-		vector<string> return_names;
+		// 准备列元数据容器
+		vector<LogicalType> table_types;          // 存储列类型
+		vector<string> table_names;               // 存储列原始名称
+		vector<TableColumnType> table_categories; // 存储列分类（未实际使用）
+
+		// 准备返回结果的列信息
+		vector<LogicalType> return_types; // 返回结果的类型列表
+		vector<string> return_names;      // 返回结果的名称列表
+
+		// 遍历逻辑列定义
 		for (auto &col : table.GetColumns().Logical()) {
-			table_types.push_back(col.Type());
-			table_names.push_back(col.Name());
-			return_types.push_back(col.Type());
-			return_names.push_back(col.Name());
+			table_types.push_back(col.Type());  // 记录列类型
+			table_names.push_back(col.Name());  // 记录列原始名
+			return_types.push_back(col.Type()); // 添加到返回类型
+			return_names.push_back(col.Name()); // 添加到返回名称
 		}
+
+		// 处理列别名（如SELECT col AS alias）
 		table_names = BindContext::AliasColumnNames(ref.table_name, table_names, ref.column_name_alias);
 
+		// 处理虚拟列（如rowid等系统生成列）
 		virtual_column_map_t virtual_columns;
 		if (scan_function.get_virtual_columns) {
+			// 从扫描函数获取虚拟列定义
 			virtual_columns = scan_function.get_virtual_columns(context, bind_data.get());
 		} else {
+			// 从表定义获取默认虚拟列
 			virtual_columns = table.GetVirtualColumns();
 		}
-		auto logical_get =
-		    make_uniq<LogicalGet>(table_index, scan_function, std::move(bind_data), std::move(return_types),
-		                          std::move(return_names), std::move(virtual_columns));
+
+		// 创建逻辑GET算子（表扫描操作节点）
+		auto logical_get = make_uniq<LogicalGet>(table_index,               // 表索引
+		                                         scan_function,             // 扫描函数
+		                                         std::move(bind_data),      // 扫描参数
+		                                         std::move(return_types),   // 返回类型列表
+		                                         std::move(return_names),   // 返回名称列表
+		                                         std::move(virtual_columns) // 虚拟列定义
+		);
+
+		// 获取算子关联的表条目（可能为nullptr）
 		auto table_entry = logical_get->GetTable();
-		auto &col_ids = logical_get->GetMutableColumnIds();
+		auto &col_ids = logical_get->GetMutableColumnIds(); // 获取可变的列ID列表
+
+		// 更新绑定上下文
 		if (!table_entry) {
+			// 无关联表条目时使用原始表名注册
 			bind_context.AddBaseTable(table_index, ref.alias, table_names, table_types, col_ids, ref.table_name);
 		} else {
+			// 有关联表条目时使用实际表条目注册
 			bind_context.AddBaseTable(table_index, ref.alias, table_names, table_types, col_ids, *table_entry);
 		}
-		return make_uniq_base<BoundTableRef, BoundBaseTableRef>(table, std::move(logical_get));
+
+		// 返回绑定的表引用结果
+		return make_uniq_base<BoundTableRef, BoundBaseTableRef>(table,                 // 表元数据
+		                                                        std::move(logical_get) // 逻辑扫描算子
+		);
 	}
 	case CatalogType::VIEW_ENTRY: {
 		// the node is a view: get the query that the view represents
