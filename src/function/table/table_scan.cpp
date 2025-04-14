@@ -717,27 +717,76 @@ virtual_column_map_t TableScanGetVirtualColumns(ClientContext &context, optional
 	return bind_data.table.GetVirtualColumns();
 }
 
+/**
+ * @brief 创建并配置表扫描函数
+ *
+ * 这是TableScanFunction类的静态工厂方法，用于创建和配置标准的表扫描函数。
+ * 使用了工厂方法设计模式来创建和初始化表扫描功能。
+ */
 TableFunction TableScanFunction::GetFunction() {
+	// 创建基础表扫描函数对象
+	// 参数1: "seq_scan" - 函数名称，表示顺序扫描
+	// 参数2: {} - 空参数列表
+	// 参数3: TableScanFunc - 主执行函数指针
 	TableFunction scan_function("seq_scan", {}, TableScanFunc);
+
+	// 初始化本地状态的回调函数
 	scan_function.init_local = TableScanInitLocal;
+
+	// 初始化全局状态的回调函数
 	scan_function.init_global = TableScanInitGlobal;
+
+	// 统计信息收集回调
 	scan_function.statistics = TableScanStatistics;
+
+	// 依赖关系处理回调
 	scan_function.dependency = TableScanDependency;
+
+	// 基数估算回调
 	scan_function.cardinality = TableScanCardinality;
+
+	// 复杂谓词下推(当前未实现)
 	scan_function.pushdown_complex_filter = nullptr;
+
+	// 字符串表示回调
 	scan_function.to_string = TableScanToString;
+
+	// 扫描进度报告回调
 	scan_function.table_scan_progress = TableScanProgress;
+
+	// 获取分区数据的回调
 	scan_function.get_partition_data = TableScanGetPartitionData;
+
+	// 获取分区统计信息的回调
 	scan_function.get_partition_stats = TableScanGetPartitionStats;
+
+	// 获取绑定信息的回调
 	scan_function.get_bind_info = TableScanGetBindInfo;
+
+	// 启用投影下推优化
 	scan_function.projection_pushdown = true;
+
+	// 启用谓词下推优化
 	scan_function.filter_pushdown = true;
+
+	// 启用谓词修剪优化
 	scan_function.filter_prune = true;
+
+	// 启用采样下推优化
 	scan_function.sampling_pushdown = true;
+
+	// 启用延迟物化优化
 	scan_function.late_materialization = true;
+
+	// 序列化回调
 	scan_function.serialize = TableScanSerialize;
+
+	// 反序列化回调
 	scan_function.deserialize = TableScanDeserialize;
+
+	// 获取虚拟列的回调
 	scan_function.get_virtual_columns = TableScanGetVirtualColumns;
+
 	return scan_function;
 }
 

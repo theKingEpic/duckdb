@@ -317,103 +317,107 @@ typedef virtual_column_map_t (*table_function_get_virtual_columns_t)(ClientConte
 //! When to call init_global to initialize the table function
 enum class TableFunctionInitialization { INITIALIZE_ON_EXECUTE, INITIALIZE_ON_SCHEDULE };
 
-class TableFunction : public SimpleNamedParameterFunction { // NOLINT: work-around bug in clang-tidy
+/**
+ * @class TableFunction
+ * @brief DuckDB 表函数基类，用于定义可扩展的表扫描操作
+ *
+ * 继承自 SimpleNamedParameterFunction，支持带参数的表格数据处理，
+ * 提供完整的生命周期管理（绑定、初始化、执行、统计等）。
+ */
+class TableFunction : public SimpleNamedParameterFunction {
 public:
-	DUCKDB_API
-	TableFunction(string name, vector<LogicalType> arguments, table_function_t function,
-	              table_function_bind_t bind = nullptr, table_function_init_global_t init_global = nullptr,
-	              table_function_init_local_t init_local = nullptr);
-	DUCKDB_API
-	TableFunction(const vector<LogicalType> &arguments, table_function_t function, table_function_bind_t bind = nullptr,
-	              table_function_init_global_t init_global = nullptr, table_function_init_local_t init_local = nullptr);
-	DUCKDB_API TableFunction();
+    /// @name 构造函数
+    /// @{
+    /**
+     * @brief 构造表函数（指定名称和参数类型）
+     * @param name 函数名称
+     * @param arguments 输入参数类型列表
+     * @param function 主执行函数
+     * @param bind 绑定函数（可选）
+     * @param init_global 全局初始化函数（可选）
+     * @param init_local 线程本地初始化函数（可选）
+     */
+    DUCKDB_API TableFunction(string name, vector<LogicalType> arguments,
+                           table_function_t function,
+                           table_function_bind_t bind = nullptr,
+                           table_function_init_global_t init_global = nullptr,
+                           table_function_init_local_t init_local = nullptr);
 
-	//! Bind function
-	//! This function is used for determining the return type of a table producing function and returning bind data
-	//! The returned FunctionData object should be constant and should not be changed during execution.
-	table_function_bind_t bind;
-	//! (Optional) Bind replace function
-	//! This function is called before the regular bind function. It allows returning a TableRef that will be used to
-	//! to generate a logical plan that replaces the LogicalGet of a regularly bound TableFunction. The BindReplace can
-	//! also return a nullptr to indicate a regular bind needs to be performed instead.
-	table_function_bind_replace_t bind_replace;
-	//! (Optional) global init function
-	//! Initialize the global operator state of the function.
-	//! The global operator state is used to keep track of the progress in the table function and is shared between
-	//! all threads working on the table function.
-	table_function_init_global_t init_global;
-	//! (Optional) local init function
-	//! Initialize the local operator state of the function.
-	//! The local operator state is used to keep track of the progress in the table function and is thread-local.
-	table_function_init_local_t init_local;
-	//! The main function
-	table_function_t function;
-	//! The table in-out function (if this is an in-out function)
-	table_in_out_function_t in_out_function;
-	//! The table in-out final function (if this is an in-out function)
-	table_in_out_function_final_t in_out_function_final;
-	//! (Optional) statistics function
-	//! Returns the statistics of a specified column
-	table_statistics_t statistics;
-	//! (Optional) dependency function
-	//! Sets up which catalog entries this table function depend on
-	table_function_dependency_t dependency;
-	//! (Optional) cardinality function
-	//! Returns the expected cardinality of this scan
-	table_function_cardinality_t cardinality;
-	//! (Optional) pushdown a set of arbitrary filter expressions, rather than only simple comparisons with a constant
-	//! Any functions remaining in the expression list will be pushed as a regular filter after the scan
-	table_function_pushdown_complex_filter_t pushdown_complex_filter;
-	//! (Optional) function for rendering the operator to a string in explain/profiling output (invoked pre-execution)
-	table_function_to_string_t to_string;
-	//! (Optional) function for rendering the operator to a string in profiling output (invoked post-execution)
-	table_function_dynamic_to_string_t dynamic_to_string;
-	//! (Optional) return how much of the table we have scanned up to this point (% of the data)
-	table_function_progress_t table_scan_progress;
-	//! (Optional) returns the partition info of the current scan operator
-	table_function_get_partition_data_t get_partition_data;
-	//! (Optional) returns extra bind info
-	table_function_get_bind_info_t get_bind_info;
-	//! (Optional) pushes down type information to scanner, returns true if pushdown was successful
-	table_function_type_pushdown_t type_pushdown;
-	//! (Optional) allows injecting a custom MultiFileReader implementation
-	table_function_get_multi_file_reader_t get_multi_file_reader;
-	//! (Optional) If this scanner supports filter pushdown, but not to all data types
-	table_function_supports_pushdown_type_t supports_pushdown_type;
-	//! Get partition info of the table
-	table_function_get_partition_info_t get_partition_info;
-	//! (Optional) get a list of all the partition stats of the table
-	table_function_get_partition_stats_t get_partition_stats;
-	//! (Optional) returns a list of virtual columns emitted by the table function
-	table_function_get_virtual_columns_t get_virtual_columns;
+    /**
+     * @brief 构造表函数（省略名称，使用默认名称）
+     * @param arguments 输入参数类型列表
+     * @param function 主执行函数
+     * @param bind 绑定函数（可选）
+     * @param init_global 全局初始化函数（可选）
+     * @param init_local 线程本地初始化函数（可选）
+     */
+    DUCKDB_API TableFunction(const vector<LogicalType> &arguments,
+                           table_function_t function,
+                           table_function_bind_t bind = nullptr,
+                           table_function_init_global_t init_global = nullptr,
+                           table_function_init_local_t init_local = nullptr);
 
-	table_function_serialize_t serialize;
-	table_function_deserialize_t deserialize;
-	bool verify_serialization = true;
+    DUCKDB_API TableFunction(); ///< 默认构造函数
+    /// @}
 
-	//! Whether or not the table function supports projection pushdown. If not supported a projection will be added
-	//! that filters out unused columns.
-	bool projection_pushdown;
-	//! Whether or not the table function supports filter pushdown. If not supported a filter will be added
-	//! that applies the table filter directly.
-	bool filter_pushdown;
-	//! Whether or not the table function can immediately prune out filter columns that are unused in the remainder of
-	//! the query plan, e.g., "SELECT i FROM tbl WHERE j = 42;" - j does not need to leave the table function at all
-	bool filter_prune;
-	//! Whether or not the table function supports sampling pushdown. If not supported a sample will be taken after the
-	//! table function.
-	bool sampling_pushdown;
-	//! Whether or not the table function supports late materialization
-	bool late_materialization;
-	//! Additional function info, passed to the bind
-	shared_ptr<TableFunctionInfo> function_info;
+    /// @name 核心函数指针
+    /// @{
+    table_function_bind_t bind; ///< 绑定函数（确定返回类型和绑定数据）
+    table_function_bind_replace_t bind_replace; ///< （可选）绑定替换函数，用于生成逻辑计划
+    table_function_init_global_t init_global; ///< （可选）全局状态初始化函数
+    table_function_init_local_t init_local; ///< （可选）线程本地状态初始化函数
+    table_function_t function; ///< 主执行函数
+    table_in_out_function_t in_out_function; ///< （可选）输入输出处理函数
+    table_in_out_function_final_t in_out_function_final; ///< （可选）输入输出最终处理函数
+    /// @}
 
-	//! When to call init_global
-	//! By default init_global is called when the pipeline is ready for execution
-	//! If this is set to `INITIALIZE_ON_SCHEDULE` the table function is initialized when the query is scheduled
-	TableFunctionInitialization global_initialization = TableFunctionInitialization::INITIALIZE_ON_EXECUTE;
+    /// @name 统计与优化
+    /// @{
+    table_statistics_t statistics; ///< （可选）列统计信息获取函数
+    table_function_dependency_t dependency; ///< （可选）依赖关系声明函数
+    table_function_cardinality_t cardinality; ///< （可选）基数估算函数
+    /// @}
 
-	DUCKDB_API bool Equal(const TableFunction &rhs) const;
+    /// @name 高级功能
+    /// @{
+    table_function_pushdown_complex_filter_t pushdown_complex_filter; ///< （可选）复杂谓词下推支持
+    table_function_to_string_t to_string; ///< （可选）执行前字符串化函数（用于EXPLAIN）
+    table_function_dynamic_to_string_t dynamic_to_string; ///< （可选）执行后字符串化函数（用于PROFILE）
+    table_function_progress_t table_scan_progress; ///< （可选）扫描进度报告函数
+    table_function_get_partition_data_t get_partition_data; ///< （可选）分区数据获取函数
+    table_function_get_bind_info_t get_bind_info; ///< （可选）绑定扩展信息获取函数
+    table_function_type_pushdown_t type_pushdown; ///< （可选）类型下推支持函数
+    table_function_get_multi_file_reader_t get_multi_file_reader; ///< （可选）多文件阅读器注入函数
+    table_function_supports_pushdown_type_t supports_pushdown_type; ///< （可选）类型敏感的下推支持
+    table_function_get_partition_info_t get_partition_info; ///< （可选）分区信息获取函数
+    table_function_get_partition_stats_t get_partition_stats; ///< （可选）分区统计获取函数
+    table_function_get_virtual_columns_t get_virtual_columns; ///< （可选）虚拟列获取函数
+    /// @}
+
+    /// @name 序列化
+    /// @{
+    table_function_serialize_t serialize; ///< （可选）状态序列化函数
+    table_function_deserialize_t deserialize; ///< （可选）状态反序列化函数
+    bool verify_serialization = true; ///< 是否验证序列化结果（默认true）
+    /// @}
+
+    /// @name 下推优化开关
+    /// @{
+    bool projection_pushdown; ///< 是否支持列投影下推（默认false）
+    bool filter_pushdown; ///< 是否支持谓词下推（默认false）
+    bool filter_prune; ///< 是否支持过滤列剪枝（默认false）
+    bool sampling_pushdown; ///< 是否支持采样下推（默认false）
+    bool late_materialization; ///< 是否支持延迟物化（默认false）
+    /// @}
+
+    /// @name 其他成员
+    /// @{
+    shared_ptr<TableFunctionInfo> function_info; ///< 附加函数信息（传递给bind）
+    TableFunctionInitialization global_initialization =
+        TableFunctionInitialization::INITIALIZE_ON_EXECUTE; ///< 全局初始化时机（默认执行时初始化）
+    /// @}
+
+    DUCKDB_API bool Equal(const TableFunction &rhs) const; ///< 比较两个表函数是否等效
 };
 
 } // namespace duckdb
