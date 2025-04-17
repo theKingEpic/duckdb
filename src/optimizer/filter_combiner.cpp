@@ -976,129 +976,173 @@ ValueComparisonResult InvertValueComparisonResult(ValueComparisonResult result) 
 	return result;
 }
 
+/**
+ * @brief 比较两个表达式值信息(ExpressionValueInformation)的关系，返回比较结果
+ *
+ * 该函数用于比较两个带有比较类型和常量的表达式，确定它们之间的逻辑关系，
+ * 返回应该修剪哪一侧或是否不满足条件。
+ *
+ * @param left 左侧的表达式值信息
+ * @param right 右侧的表达式值信息
+ * @return ValueComparisonResult 比较结果，指示应该修剪哪一侧或是否不满足条件
+ */
 ValueComparisonResult CompareValueInformation(ExpressionValueInformation &left, ExpressionValueInformation &right) {
-	if (left.comparison_type == ExpressionType::COMPARE_EQUAL) {
-		// left is COMPARE_EQUAL, we can either
-		// (1) prune the right side or
-		// (2) return UNSATISFIABLE
-		bool prune_right_side = false;
-		switch (right.comparison_type) {
-		case ExpressionType::COMPARE_LESSTHAN:
-			prune_right_side = left.constant < right.constant;
-			break;
-		case ExpressionType::COMPARE_LESSTHANOREQUALTO:
-			prune_right_side = left.constant <= right.constant;
-			break;
-		case ExpressionType::COMPARE_GREATERTHAN:
-			prune_right_side = left.constant > right.constant;
-			break;
-		case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
-			prune_right_side = left.constant >= right.constant;
-			break;
-		case ExpressionType::COMPARE_NOTEQUAL:
-			prune_right_side = left.constant != right.constant;
-			break;
-		default:
-			D_ASSERT(right.comparison_type == ExpressionType::COMPARE_EQUAL);
-			prune_right_side = left.constant == right.constant;
-			break;
-		}
-		if (prune_right_side) {
-			return ValueComparisonResult::PRUNE_RIGHT;
-		} else {
-			return ValueComparisonResult::UNSATISFIABLE_CONDITION;
-		}
-	} else if (right.comparison_type == ExpressionType::COMPARE_EQUAL) {
-		// right is COMPARE_EQUAL
-		return InvertValueComparisonResult(CompareValueInformation(right, left));
-	} else if (left.comparison_type == ExpressionType::COMPARE_NOTEQUAL) {
-		// left is COMPARE_NOTEQUAL, we can either
-		// (1) prune the left side or
-		// (2) not prune anything
-		bool prune_left_side = false;
-		switch (right.comparison_type) {
-		case ExpressionType::COMPARE_LESSTHAN:
-			prune_left_side = left.constant >= right.constant;
-			break;
-		case ExpressionType::COMPARE_LESSTHANOREQUALTO:
-			prune_left_side = left.constant > right.constant;
-			break;
-		case ExpressionType::COMPARE_GREATERTHAN:
-			prune_left_side = left.constant <= right.constant;
-			break;
-		case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
-			prune_left_side = left.constant < right.constant;
-			break;
-		default:
-			D_ASSERT(right.comparison_type == ExpressionType::COMPARE_NOTEQUAL);
-			prune_left_side = left.constant == right.constant;
-			break;
-		}
-		if (prune_left_side) {
-			return ValueComparisonResult::PRUNE_LEFT;
-		} else {
-			return ValueComparisonResult::PRUNE_NOTHING;
-		}
-	} else if (right.comparison_type == ExpressionType::COMPARE_NOTEQUAL) {
-		return InvertValueComparisonResult(CompareValueInformation(right, left));
-	} else if (IsGreaterThan(left.comparison_type) && IsGreaterThan(right.comparison_type)) {
-		// both comparisons are [>], we can either
-		// (1) prune the left side or
-		// (2) prune the right side
-		if (left.constant > right.constant) {
-			// left constant is more selective, prune right
-			return ValueComparisonResult::PRUNE_RIGHT;
-		} else if (left.constant < right.constant) {
-			// right constant is more selective, prune left
-			return ValueComparisonResult::PRUNE_LEFT;
-		} else {
-			// constants are equivalent
-			// however we can still have the scenario where one is [>=] and the other is [>]
-			// we want to prune the [>=] because [>] is more selective
-			// if left is [>=] we prune the left, else we prune the right
-			if (left.comparison_type == ExpressionType::COMPARE_GREATERTHANOREQUALTO) {
-				return ValueComparisonResult::PRUNE_LEFT;
-			} else {
-				return ValueComparisonResult::PRUNE_RIGHT;
-			}
-		}
-	} else if (IsLessThan(left.comparison_type) && IsLessThan(right.comparison_type)) {
-		// both comparisons are [<], we can either
-		// (1) prune the left side or
-		// (2) prune the right side
-		if (left.constant < right.constant) {
-			// left constant is more selective, prune right
-			return ValueComparisonResult::PRUNE_RIGHT;
-		} else if (left.constant > right.constant) {
-			// right constant is more selective, prune left
-			return ValueComparisonResult::PRUNE_LEFT;
-		} else {
-			// constants are equivalent
-			// however we can still have the scenario where one is [<=] and the other is [<]
-			// we want to prune the [<=] because [<] is more selective
-			// if left is [<=] we prune the left, else we prune the right
-			if (left.comparison_type == ExpressionType::COMPARE_LESSTHANOREQUALTO) {
-				return ValueComparisonResult::PRUNE_LEFT;
-			} else {
-				return ValueComparisonResult::PRUNE_RIGHT;
-			}
-		}
-	} else if (IsLessThan(left.comparison_type)) {
-		D_ASSERT(IsGreaterThan(right.comparison_type));
-		// left is [<] and right is [>], in this case we can either
-		// (1) prune nothing or
-		// (2) return UNSATISFIABLE
-		// the SMALLER THAN constant has to be greater than the BIGGER THAN constant
-		if (left.constant >= right.constant) {
-			return ValueComparisonResult::PRUNE_NOTHING;
-		} else {
-			return ValueComparisonResult::UNSATISFIABLE_CONDITION;
-		}
-	} else {
-		// left is [>] and right is [<] or [!=]
-		D_ASSERT(IsLessThan(right.comparison_type) && IsGreaterThan(left.comparison_type));
-		return InvertValueComparisonResult(CompareValueInformation(right, left));
-	}
-}
+    // 情况1：左侧是比较类型为等于(COMPARE_EQUAL)
+    if (left.comparison_type == ExpressionType::COMPARE_EQUAL) {
+        // 左侧是等于比较，我们可以：
+        // (1) 修剪右侧 或
+        // (2) 返回不满足条件
 
+        bool prune_right_side = false;
+        switch (right.comparison_type) {
+        case ExpressionType::COMPARE_LESSTHAN:
+            // 右侧是小于，如果左侧常量小于右侧常量则可以修剪右侧
+            prune_right_side = left.constant < right.constant;
+            break;
+        case ExpressionType::COMPARE_LESSTHANOREQUALTO:
+            // 右侧是小于等于，如果左侧常量小于等于右侧常量则可以修剪右侧
+            prune_right_side = left.constant <= right.constant;
+            break;
+        case ExpressionType::COMPARE_GREATERTHAN:
+            // 右侧是大于，如果左侧常量大于右侧常量则可以修剪右侧
+            prune_right_side = left.constant > right.constant;
+            break;
+        case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
+            // 右侧是大于等于，如果左侧常量大于等于右侧常量则可以修剪右侧
+            prune_right_side = left.constant >= right.constant;
+            break;
+        case ExpressionType::COMPARE_NOTEQUAL:
+            // 右侧是不等于，如果左侧常量不等于右侧常量则可以修剪右侧
+            prune_right_side = left.constant != right.constant;
+            break;
+        default:
+            // 默认情况：右侧也是等于比较，只有当两个常量相等时才能修剪右侧
+            D_ASSERT(right.comparison_type == ExpressionType::COMPARE_EQUAL);
+            prune_right_side = left.constant == right.constant;
+            break;
+        }
+
+        if (prune_right_side) {
+            return ValueComparisonResult::PRUNE_RIGHT;
+        } else {
+            return ValueComparisonResult::UNSATISFIABLE_CONDITION;
+        }
+    }
+    // 情况2：右侧是比较类型为等于(COMPARE_EQUAL)
+    else if (right.comparison_type == ExpressionType::COMPARE_EQUAL) {
+        // 右侧是等于比较，通过交换参数并反转结果来处理
+        return InvertValueComparisonResult(CompareValueInformation(right, left));
+    }
+    // 情况3：左侧是比较类型为不等于(COMPARE_NOTEQUAL)
+    else if (left.comparison_type == ExpressionType::COMPARE_NOTEQUAL) {
+        // 左侧是不等于比较，我们可以：
+        // (1) 修剪左侧 或
+        // (2) 不修剪任何内容
+
+        bool prune_left_side = false;
+        switch (right.comparison_type) {
+        case ExpressionType::COMPARE_LESSTHAN:
+            // 右侧是小于，如果左侧常量大于等于右侧常量则可以修剪左侧
+            prune_left_side = left.constant >= right.constant;
+            break;
+        case ExpressionType::COMPARE_LESSTHANOREQUALTO:
+            // 右侧是小于等于，如果左侧常量大于右侧常量则可以修剪左侧
+            prune_left_side = left.constant > right.constant;
+            break;
+        case ExpressionType::COMPARE_GREATERTHAN:
+            // 右侧是大于，如果左侧常量小于等于右侧常量则可以修剪左侧
+            prune_left_side = left.constant <= right.constant;
+            break;
+        case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
+            // 右侧是大于等于，如果左侧常量小于右侧常量则可以修剪左侧
+            prune_left_side = left.constant < right.constant;
+            break;
+        default:
+            // 默认情况：右侧也是不等于比较，只有当两个常量相等时才能修剪左侧
+            D_ASSERT(right.comparison_type == ExpressionType::COMPARE_NOTEQUAL);
+            prune_left_side = left.constant == right.constant;
+            break;
+        }
+
+        if (prune_left_side) {
+            return ValueComparisonResult::PRUNE_LEFT;
+        } else {
+            return ValueComparisonResult::PRUNE_NOTHING;
+        }
+    }
+    // 情况4：右侧是比较类型为不等于(COMPARE_NOTEQUAL)
+    else if (right.comparison_type == ExpressionType::COMPARE_NOTEQUAL) {
+        // 右侧是不等于比较，通过交换参数并反转结果来处理
+        return InvertValueComparisonResult(CompareValueInformation(right, left));
+    }
+    // 情况5：两侧都是大于类比较(>或>=)
+    else if (IsGreaterThan(left.comparison_type) && IsGreaterThan(right.comparison_type)) {
+        // 两个比较都是大于类，我们可以：
+        // (1) 修剪左侧 或
+        // (2) 修剪右侧
+
+        if (left.constant > right.constant) {
+            // 左侧常量更具选择性(更大)，修剪右侧
+            return ValueComparisonResult::PRUNE_RIGHT;
+        } else if (left.constant < right.constant) {
+            // 右侧常量更具选择性(更大)，修剪左侧
+            return ValueComparisonResult::PRUNE_LEFT;
+        } else {
+            // 常量相等
+            // 但可能出现一个是>=另一个是>的情况
+            // 我们想修剪>=的那边，因为>更具选择性
+            // 如果左侧是>=就修剪左侧，否则修剪右侧
+            if (left.comparison_type == ExpressionType::COMPARE_GREATERTHANOREQUALTO) {
+                return ValueComparisonResult::PRUNE_LEFT;
+            } else {
+                return ValueComparisonResult::PRUNE_RIGHT;
+            }
+        }
+    }
+    // 情况6：两侧都是小于类比较(<或<=)
+    else if (IsLessThan(left.comparison_type) && IsLessThan(right.comparison_type)) {
+        // 两个比较都是小于类，我们可以：
+        // (1) 修剪左侧 或
+        // (2) 修剪右侧
+
+        if (left.constant < right.constant) {
+            // 左侧常量更具选择性(更小)，修剪右侧
+            return ValueComparisonResult::PRUNE_RIGHT;
+        } else if (left.constant > right.constant) {
+            // 右侧常量更具选择性(更小)，修剪左侧
+            return ValueComparisonResult::PRUNE_LEFT;
+        } else {
+            // 常量相等
+            // 但可能出现一个是<=另一个是<的情况
+            // 我们想修剪<=的那边，因为<更具选择性
+            // 如果左侧是<=就修剪左侧，否则修剪右侧
+            if (left.comparison_type == ExpressionType::COMPARE_LESSTHANOREQUALTO) {
+                return ValueComparisonResult::PRUNE_LEFT;
+            } else {
+                return ValueComparisonResult::PRUNE_RIGHT;
+            }
+        }
+    }
+    // 情况7：左侧是小于类比较，右侧是大于类比较
+    else if (IsLessThan(left.comparison_type)) {
+        D_ASSERT(IsGreaterThan(right.comparison_type));
+        // 左侧是<而右侧是>，这种情况下我们可以：
+        // (1) 不修剪任何内容 或
+        // (2) 返回不满足条件
+        // 小于的常量必须大于大于的常量才有解
+
+        if (left.constant >= right.constant) {
+            return ValueComparisonResult::PRUNE_NOTHING;
+        } else {
+            return ValueComparisonResult::UNSATISFIABLE_CONDITION;
+        }
+    }
+    // 情况8：其他情况(左侧是大于类比较，右侧是小于类或不等于比较)
+    else {
+        // 左侧是>而右侧是<或!=
+        D_ASSERT(IsLessThan(right.comparison_type) && IsGreaterThan(left.comparison_type));
+        // 通过交换参数并反转结果来处理
+        return InvertValueComparisonResult(CompareValueInformation(right, left));
+    }
+}
 } // namespace duckdb
